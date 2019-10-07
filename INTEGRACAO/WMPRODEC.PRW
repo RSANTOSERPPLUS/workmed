@@ -11,6 +11,7 @@ Class WMPRODEC
 
     //Fields that will be available in the json 
     Data ean as string
+    Data ncm as String
     Data name as string
     Data description as string
     Data description_small as string
@@ -29,7 +30,7 @@ Class WMPRODEC
     Data category_id as string
     Data available   as string
     Data availability  as string
-    Data availability_days
+    Data availability_days as numeric
     Data reference as string
     Data related_categories as string
     Data release_date as string
@@ -60,6 +61,7 @@ Method New(cProduto,cProdFil) Class WMPRODEC
     Default cProduto := ""
     
     self:ean    := ""
+    self:ncm    := ""
     self:name   := ""
     self:description := ""
     self:description_small := ""
@@ -83,9 +85,9 @@ Method New(cProduto,cProdFil) Class WMPRODEC
     self:related_categories := ""
     self:release_date := ""
     self:shortcut := ""
-    self:virtual_product := ""
+    self:virtual_product := "0"
 
-    ProdRec := 0
+    self:ProdRec := 0
 
     DbSelectArea('SB1')
     SB1->( DbSetorder(1) ) //B1_FILIAL+B1_COD 
@@ -101,7 +103,7 @@ Method New(cProduto,cProdFil) Class WMPRODEC
 
         if SB1->( DbSeeK( cProdFil +  cProduto ) )
 
-            ProdRec := SB1->(Recno() )
+            self:ProdRec := SB1->(Recno() )
             self:cProduto := SB1->B1_COD
             self:reference := AllTrim(SB1->B1_COD)
             lRet := .T. //if found, I set return as true
@@ -135,11 +137,12 @@ Method GetMainData() Class WMPRODEC
 
         if SB1->( DbGoTo(self:ProdRec) )
             self:ean  := SB1->B1_CODBAR
+            self:ncm  := SB1->B1_POSIPI
             self:name := AllTrim(SB1->B1_DESC)
             self:description := AllTrim(SB1->B1_DESC)
             self:description_small := Left(AllTrim(SB1->B1_DESC),40) //check this field length
             self:price := SB1->B1_PRV1  
-            self:reference  := SB1->B1_COD  
+            self:reference  := AllTrim(SB1->B1_COD)
 
         Endif
 
@@ -157,11 +160,15 @@ Method getprodprc() Class WMPRODEC
     Local cPlistCode := "" 
     Local cAliasTmp  := GetNextAlias()
 
+    if Empty(cTabPrc) .and. Empty(self:cProduto) .or. self:ProdRec == 0
+        return lRet
+    Endif
+
     DbSelectArea("DA0")
     DA0->( DbSetorder(1) )//DA0_FILIAL+DA0_CODTAB
 
     DbSelectArea("DA1")
-    DA1->( DbSetorder(1) )//DA0_FILIAL+DA0_CODTAB
+    DA1->( DbSetorder(1) )//DA1_FILIAL+DA1_CODTAB+DA1_CODPRO
 
     If Select("SB1") == 0
         DbSelectArea("SB1")
@@ -169,25 +176,23 @@ Method getprodprc() Class WMPRODEC
 
     SB1->( DbGoTo(self:ProdRec ) )
 
-    BeginSql Alias cAliasTmp
+    If DA0->( DbSeeK(cDA0FIL + cTabPrc ) )
+         lRet := .T.
+         self:start_promotion := SubStr(DTOS(DA0->DA0_DATDE),1,4) + '-' + SubStr(DTOS(DA0->DA0_DATDE),5,2) + '-' + SubStr(DTOS(DA0->DA0_DATDE),7,2)
+         self:end_promotion   := SubStr(DTOS(DA0->DA0_DATATE),1,4) + '-' + SubStr(DTOS(DA0->DA0_DATATE),5,2) + '-' + SubStr(DTOS(DA0->DA0_DATATE),7,2)       
+    Endif
 
-        %noparser%
-
-        SELECT TOP 1 *
-        FROM 
-            DA1010
-        WHERE
-            DA1_CODTAB = %Exp:cTabPrc% AND 
-            DA1_CODPRO = %Exp:cProduto% AND
-            %notdel%
-
-    EndSql
-
-    If !(cAliasTmp)->( Eof())
-        lRet := .T.
-        self:price := SB1->B1_PRV1
-        self:cost_price := 0 // TODO: Check the cost price
-        self:promotional_price := (cAliasTmp)->DA1_PRCVEN
+    if lRet
+        lRet := .F.
+        If  DA1->(DbSeeK( cFilDA1 + cTabPrc + self:cProduto ))
+            If DA1->DA1_DATVIG >= dDataBase
+                self:price := SB1->B1_PRV1
+                self:cost_price := 0 // TODO: Check the cost price
+                self:promotional_price := DA1->DA1_PRCVEN          
+                
+                lRet := .T.
+            Endif
+        Endif
     Endif
 
 return lRet
@@ -232,14 +237,45 @@ Method getDimensions() Class WMPRODEC
 return lRet
 
 
-/*get product's stock*/
+/*get product's balance*/
 Method getBalance() Class WMPRODEC
-    Local lRet := .T.
-    Local cWhouse := supergetMV("MV_XWHECOM",,"01") //Deafult WareHouse
+
+    Local cWhouse   := supergetMV("MV_XWHECOM",,"01") //Deafult WareHouse
     Local cAliasTmp := GetNextAlias()
+    Local cQuery    := ""
+    Local nBalance  := 0
 
+	cQuery := CRLF + " SELECT "
+	cQuery += CRLF + "   B2_COD , B1_ESTSEG , SUM(B2_QATU - B2_QEMP - B2_RESERVA) B2_SALDO "
+	cQuery += CRLF + " FROM "
+	cQuery += CRLF + "   "+ SB2->(RetSQLName("SB2")) +" B2 "
+	cQuery += CRLF + "   INNER JOIN "+ SB1->(RetSQLName("SB1")) +" B1 ON "
+	cQuery += CRLF + "     B1_FILIAL = '"+ SB1->(xFILIAL("SB1")) +"' AND B1_COD = B2_COD	
+	cQuery += CRLF + "     AND B1_TIPO = 'PA' AND B1.D_E_L_E_T_ = ' ' "
+	cQuery += CRLF + " WHERE "
+	cQuery += CRLF + "   B2_FILIAL = '"+ SB2->(xFILIAL("SB2")) +"' AND "
+    cQuery += CRLF + "   B2_LOCAL IN "+ FORMATIN( cWhouse ,";") +" "
+	cQuery += CRLF + "   AND B2.D_E_L_E_T_ = ' ' "
+	cQuery += CRLF + " GROUP BY "
+	cQuery += CRLF + "   B2_COD , B1_ESTSEG
+	cQuery += CRLF + " ORDER BY "
+	cQuery += CRLF + "   B2_COD "   
 
+	MEMOWRITE("PROD_BALANCE.SQL",cQuery)
+	    
+	TcQuery cQuery Alias TSB2 New
+
+    TSB2->(dbGoTop())
+	If !TSB2->(EOF())
+
+		nBalance := TSB2->B2_SALDO - TSB2->B1_ESTSEG
+
+		If nBalance < 0
+			nBalance := 0
+        Endif
+
+    Endif 
+
+    self:stock := nBalance
     
-
-
-return lRet
+return 
