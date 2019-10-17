@@ -11,5 +11,5 @@ Description //Retorna a Url para consumo de API's
 @since: 04-10-2019 /*/
 //--------------------------------------------------------------
 user function TrayUrl()
-    local cUrl := 'https://trayparceiros.commercesuite.com.br/web_api'//GetMv("MV_XURLECO")
+    local cUrl := 'https://trayparceiros.commercesuite.com.br'//GetMv("MV_XURLECO")
 return cUrl

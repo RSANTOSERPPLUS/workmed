@@ -3,13 +3,13 @@
 #include 'topconn.ch' 
 
 //--------------------------------------------------------------
-/*/{Protheus.doc} GETTOKEN
+/*{Protheus.doc} GETTOKEN
 Description //Busca token de acesso na plataforma Tray
 @param Nil
 @return cAccessTk - Retorna o token de acesso
 @author  - Rafael S.Silva
 @since: 04-10-2019 /*/
-//--------------------------------------------------------------
+*/
 User Function GETTOKEN()
     Local cConsumKey := ""
     Local cConSecret := ""
@@ -19,10 +19,10 @@ User Function GETTOKEN()
     Local cPath      := "/web_api/auth"
     Local oParamPost := JsonObject():new()
     Local cAccesTok  := ""
-    Private oRestCli   
+    Local oRestCli   
     
     aadd(aHeader,'Content-Type: application/json')
-    aadd(aHeader,'Content-Type: multipart/form-data')
+    //aadd(aHeader,'Content-Type: multipart/form-data')
 
     cUrl        := AllTrim(U_TrayUrl())
     cConsumKey  := AllTrim(getConsKey())
@@ -52,6 +52,7 @@ User Function GETTOKEN()
         CONOUT("Could not get the access token. the request returned the following error: ")
         CONOUT("Error:" + oRestCli:GetLastError())
         CONOUT("================================================================================")
+        cAccesTok := ""
     endif
 
 Return cAccesTok

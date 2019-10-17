@@ -1,10 +1,11 @@
 #include 'protheus.ch' 
 #include 'totvs.ch' 
 #include 'topconn.ch' 
+#include 'tbiconn.ch' 
 
 //--------------------------------------------------------------
 /*/{Protheus.doc} WMTRAY01
-Description //Integrao de produtos Tray - Ecommerce
+Description //Integração de produtos Tray - Ecommerce
             // Envia os produtos cadastrados no Protheus para a Tray.
 @param xParam Parameter Description
 @return xRet Return Nil
@@ -14,19 +15,17 @@ Description //Integrao de produtos Tray - Ecommerce
 User Function WMTRAY01()
 
     Local cEndPoint  := ""
-    Local cPath      := "/products/"
-    Local oRestProd  := Nil
+    Local cPath      := "/web_api/products"
     Local oProdData  := Nil
     Local oProdJson  := Nil
     Local oJsonRet   := Nil
-    Local aHeader    := {}
+    Local aHeadStr    := {}
     Local cAliasPrd  := GetNextAlias()
     Local lKeep      := .F.
     Local lChangePrd := .F.
     Local aClose     := {"SB1","DA0","DA1","SB5","SB2"}
-
-    RpcSetType(3)
-    RpcSetEnv('99','01')
+    Local lRestOk    := .F.
+    Private oRestProd  := Nil
 
     cEndPoint := U_TrayUrl() //Busco a URL de acesso as API's da Tray - https://{api_address}
 
@@ -37,7 +36,7 @@ User Function WMTRAY01()
     oRestProd     := FWRest():New(cEndPoint)
 
     //Defino o tipo de envio/retorno da requisição
-    aAdd(aHeader,"Content-Type: application/json")
+    aAdd(aHeadStr,"Content-Type: application/json")
     
     BeginSql Alias cAliasPrd
         %noparser%
@@ -46,7 +45,7 @@ User Function WMTRAY01()
         FROM 
             %table:SZB%
         WHERE
-            ZB_INTEG = %exp:'1'% 
+            ZB_INTEGRA = %exp:'1'% AND 
             %notdel%
 
     EndSql
@@ -71,17 +70,17 @@ User Function WMTRAY01()
         //Descrição, ncm, ean...
         oProdData:GetMainData()
 
-        //carrega dados de preo e valor do produto
+        //carrega dados de preço e valor do produto
         oProdData:getprodprc()
         
-        //Carrega as dimenses do produto
+        //Carrega as dimessões do produto
         oProdData:getDimensions()
 
         //Carrega o saldo do produuto em estoque
         oProdData:getStock()
 
         //Verifico se o produto já foi cadastrado
-        lChangePrd := SZB->ZB_CADOK == "S"
+        lChangePrd := SZB->ZB_CADOK == "S" .or. !Empty(SZB->ZB_PRODECO)
 
     
         //Defino a disponibilidade do produto
@@ -89,60 +88,67 @@ User Function WMTRAY01()
         oProdData:SetAvailabilty(1)
 
         oProdJson['Product'] := JsonObject():New()    
-        oProdJson['Product']['ean']  :=  oProdData:ean
-        oProdJson['Product']['ncm']  :=  oProdData:ncm
-        oProdJson['Product']['name'] :=  oProdData:name
-        oProdJson['Product']['description'] := oProdData:description
-        oProdJson['Product']['description_small'] := oProdData:description_small
-        oProdJson['Product']['price'] := oProdData:price
+        oProdJson['Product']['ean']  :=  AllTrim(oProdData:ean)
+        oProdJson['Product']['ncm']  :=  AllTrim(oProdData:ncm)
+        oProdJson['Product']['name'] :=  AllTrim(oProdData:name)
+        oProdJson['Product']['description'] := AllTrim(oProdData:description)
+        oProdJson['Product']['description_small'] := AllTrim(oProdData:description_small)
+        oProdJson['Product']['price'] := oProdData:price	
         oProdJson['Product']['cost_price'] := oProdData:cost_price
         oProdJson['Product']['promotional_price'] := oProdData:promotional_price
         oProdJson['Product']['start_promotion'] := oProdData:start_promotion
         oProdJson['Product']['end_promotion']   := oProdData:end_promotion 
         oProdJson['Product']['brand'] := oProdData:brand
-        oProdJson['Product']['model'] := oProdData:model
+        oProdJson['Product']['model'] := AllTrim(oProdData:model)
         oProdJson['Product']['weight'] := oProdData:weight
         oProdJson['Product']['length'] := oProdData:length
         oProdJson['Product']['width']  := oProdData:width
         oProdJson['Product']['height'] := oProdData:height
         oProdJson['Product']['stock']  := oProdData:stock
-        oProdJson['Product']['category_id'] := oProdData:category_id
-        oProdJson['Product']['available'] := oProdData:available
-        oProdJson['Product']['availability'] := oProdData:availability
+        oProdJson['Product']['category_id'] := '33915'//oProdData:category_id
+        oProdJson['Product']['available'] := AllTrim(oProdData:available)
+        oProdJson['Product']['availability'] := "Disponivel"//oProdData:availability
         oProdJson['Product']['availability_days'] := oProdData:availability_days
-        oProdJson['Product']['reference'] := oProdData:reference
-        oProdJson['Product']['related_categories'] = oProdData:related_categories//'3,5,7';
-        oProdJson['Product']['release_date'] := ''
+        oProdJson['Product']['reference'] := AllTrim(oProdData:reference)
+        oProdJson['Product']['related_categories'] := '19921,19925' //oProdData:related_categories//'3,5,7';
+        //oProdJson['Product']['release_date'] := ''
         oProdJson['Product']['shortcut'] := ''
         oProdJson['Product']['virtual_product'] := '0'
         
-        cPost := oProdJson:toJson()//Serializa o Objeto Json
-
+        cPost := oProdJson:toJson()
+        
+        cPath := "/web_api/products/"
         If lChangePrd
             cPath += AllTrim((cAliasPrd)->ZB_PRODECO)+'/'//Se for Alteração, passo o ID do produto no e-commerce
         endif
 
-        cPath+= "?access_token="+cToken
+        cPath += "?access_token="+cToken
 
         oRestProd:setPath(cPath)
         oRestProd:SetPostParams(cPost)
-
-        if oRestProd:Post(aHeader)
+        
+        if lChangePrd
+        	lRestOk := oRestProd:Put(aHeadStr,cPost)
+        Else
+        	lRestOk := oRestProd:Post(aHeadStr)
+        Endif
+        
+        if lRestOk
             oJsonRet:fromJson(oRestProd:cReSult)
 
-            if Selcet("SZB") ==  0  
-                SZB->(DbSelectArea())
+            if Select("SZB") ==  0  
+                DbSelectArea("SZB")
             endif
 
             if ValType(oJsonRet) == "J"
-                oJsonRet['id']
 
-                If ( DbSeek(xFilial("SZB") + oProdData:cProduto ) )
+                If SZB->( DbSeek(xFilial("SZB") + oProdData:cProduto ) )
                     RecLock("SZB",.F.)
                     SZB->ZB_PRODECO := AllTrim(oJsonRet['id'])
                     SZB->ZB_INTEGRA := '1'
-                    SZB->ZB_DATAREC := Date()
-                    SZB->ZB_HORAREC := Time()
+                    SZB->ZB_DATAINT := Date()
+                    SZB->ZB_HORAINT := Time()
+                    SZB->ZB_JSONENV := cPost
                     SZB->ZB_JSONREC := oRestProd:cReSult
                     SZB->ZB_CADOK   := 'S'
                     SZB->(Msunlock())
@@ -151,9 +157,13 @@ User Function WMTRAY01()
 
         else
             If IsBlind()
-                MsgInfo('Não foi possível cadastrado o produto '+ oProdData:cProduto +' no e-commerce (Erro na requisição). ','WMTRAY01')
-            else
                 Conout('Não foi possível cadastrado o produto '+ oProdData:cProduto +' no e-commerce (Erro na requisição). ')
+                Conout('Retorno: '+ oRestProd:GetLastError())
+                Conout(oRestProd:cResult)                                        
+            else                                    
+                MsgInfo('Não foi possível cadastrado o produto '+ oProdData:cProduto +' no e-commerce (Erro na requisição). ' + CRLF + ; 
+                		'Retorno: '+ oRestProd:GetLastError() + CRLF + ;
+                		oRestProd:cResult,'WMTRAY01')
             Endif
         endif
 
@@ -161,7 +171,7 @@ User Function WMTRAY01()
 
     EndDo
 
-    AreaClose(aClose)
+    //AreaClose(aClose)
 
 
 Return()
@@ -185,3 +195,12 @@ Static function AreaClose(aClose)
 
 return
 
+
+user function JBTRAY01()
+
+    RpcSetType(3)
+    RpcSetEnv('02','01')
+    
+    U_WMTRAY01()
+    
+return 
